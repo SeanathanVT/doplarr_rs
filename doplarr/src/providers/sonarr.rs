@@ -261,7 +261,7 @@ impl Sonarr {
             options.push(DropdownOption {
                 title: "All Seasons".to_string(),
                 description: Some("Includes future seasons".to_string()),
-                id: Some(SelectableId::Integer(ALL_SEASONS_ID)),
+                id: Some(SelectableId::Integer(ALL_ITEMS_ID)),
             });
         }
 
@@ -459,7 +459,7 @@ impl TryFrom<Vec<RequestDetails>> for SelectedDetails {
             if detail.metadata.as_deref() == Some(field_keys::SEASON) {
                 for opt in detail.selected_options() {
                     match &opt.id {
-                        Some(SelectableId::Integer(ALL_SEASONS_ID)) => all_seasons = true,
+                        Some(SelectableId::Integer(ALL_ITEMS_ID)) => all_seasons = true,
                         Some(SelectableId::Integer(i)) => season_numbers.push(*i),
                         other => bail!("Season must have an integer ID, got {other:?}"),
                     }
@@ -857,7 +857,7 @@ impl MediaBackend for Sonarr {
             })
             .unwrap_or_default();
 
-        let detail_text = if season_nums.contains(&ALL_SEASONS_ID) {
+        let detail_text = if season_nums.contains(&ALL_ITEMS_ID) {
             " (All Seasons)".to_string()
         } else {
             match format_seasons(&season_nums) {
@@ -998,7 +998,7 @@ mod tests {
     fn try_from_all_seasons_sentinel() {
         let mut details = full_details();
         // "All Seasons" option (sentinel id) selected, leading the list.
-        *details.last_mut().unwrap() = season_field(&[ALL_SEASONS_ID, 2, 1], &[0]);
+        *details.last_mut().unwrap() = season_field(&[ALL_ITEMS_ID, 2, 1], &[0]);
         let selected = SelectedDetails::try_from(details).unwrap();
         assert!(selected.all_seasons);
         assert!(selected.season_numbers.is_empty());

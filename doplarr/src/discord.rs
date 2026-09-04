@@ -1,5 +1,5 @@
 use crate::providers::{
-    ALL_SEASONS_ID, DropdownOption, EmbedData, FieldType, MediaBackend, MediaDisplayInfo,
+    ALL_ITEMS_ID, DropdownOption, EmbedData, FieldType, MediaBackend, MediaDisplayInfo,
     RequestDetails, SelectableId, SuccessMessage,
 };
 use anyhow::Context;
@@ -823,7 +823,7 @@ pub async fn run_interaction(
                 // re-render: selecting it clears the others; selecting another
                 // while it's active drops it.
                 let exclusive = detail.options.iter().position(
-                    |o| matches!(o.id, Some(SelectableId::Integer(n)) if n == ALL_SEASONS_ID),
+                    |o| matches!(o.id, Some(SelectableId::Integer(n)) if n == ALL_ITEMS_ID),
                 );
                 if let Some(excl) = exclusive
                     && indices.contains(&excl)
