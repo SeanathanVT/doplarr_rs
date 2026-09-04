@@ -10,7 +10,7 @@
 
 A Discord bot for requesting media through \*arr backends, written in Rust.
 
-Each backend you configure creates a `/request <media>` slash command — e.g. `/request movie` and `/request series`. Backends can also be grouped, nesting related commands one level deeper.
+Each backend you configure creates a `/request <media>` slash command — e.g. `/request movie` and `/request series`. Backends can also be grouped, giving nested commands like `/request music artist`.
 
 ## Screenshots
 
@@ -31,7 +31,7 @@ Under **OAuth2 → URL Generator**, tick the `bot` and `applications.commands` s
 
 ### 2. Get your backend API keys
 
-- **Sonarr / Radarr**: Settings → General → Security → API Key
+- **Sonarr / Radarr / Lidarr**: Settings → General → Security → API Key
 - **Seerr**: Settings → API Key — must be an **admin** key
 
 ### 3. Configure and run
@@ -76,10 +76,11 @@ api_key = "your_sonarr_api_key"
 
 Each `[[backends]]` block adds one `/request <media>` command. Any option you
 leave out (quality profile, root folder, …) is simply asked for in Discord at
-request time. Add an optional `group` to nest a command one level deeper.
+request time. Add an optional `group` to nest a command one level deeper, so
+`media = "artist"` with `group = "music"` becomes `/request music artist`.
 
 That's all most setups need. For the **full list of options** — plus Seerr, 4K,
-anime, and pointing several commands at one instance — see the annotated
+anime, music, and pointing several commands at one instance — see the annotated
 **[config.example.toml](config.example.toml)**.
 
 > [!TIP]
@@ -98,6 +99,20 @@ anime, and pointing several commands at one instance — see the annotated
 > notification agent (Settings → Notifications → Discord), then each user enters
 > their Discord User ID on their profile. To accept requests from unlinked users
 > instead, set `fallback_user_id` in the config.
+
+### Using Lidarr
+
+A Lidarr backend searches either artists or albums, set by `search_mode`. Most
+setups want both, nested under one `group` as `/request music artist` and
+`/request music album`.
+
+> [!NOTE]
+> Lidarr can't list the albums of an artist it hasn't added yet, so artist mode
+> asks how much of a new artist's discography to monitor (the same choice
+> Lidarr's own Add Artist screen offers). Once the artist is in your library,
+> requesting them again brings up an album picker instead. To request one
+> specific record by an artist you don't have, use album mode: it adds the
+> artist as a side effect and monitors only that album.
 
 ## Running as a Service
 

@@ -3,8 +3,8 @@ use clap::Parser;
 use config::{Backend, BackendConfig};
 use discord::InteractionContinue;
 use providers::{
-    MediaBackend, UserFacingError, radarr::Radarr, seerr::Seerr as SeerrBackend, sonarr::Sonarr,
-    sportarr::Sportarr,
+    MediaBackend, UserFacingError, lidarr::Lidarr, radarr::Radarr, seerr::Seerr as SeerrBackend,
+    sonarr::Sonarr, sportarr::Sportarr,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -146,6 +146,9 @@ async fn main() -> anyhow::Result<()> {
             }
             BackendConfig::Sportarr { .. } => {
                 Arc::new(Sportarr::connect(config.clone(), backend_http.clone()).await?)
+            }
+            BackendConfig::Lidarr { .. } => {
+                Arc::new(Lidarr::connect(config.clone(), backend_http.clone()).await?)
             }
         };
         backends.insert(

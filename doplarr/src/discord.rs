@@ -540,10 +540,10 @@ fn build_success_embed(data: &EmbedData) -> Embed {
     }
 
     if let Some(ref studio) = data.studio_or_network {
-        let label = if data.media_type == "TV Series" {
-            "Network"
-        } else {
-            "Studio"
+        let label = match data.media_type {
+            "TV Series" => "Network",
+            "Album" => "Artist",
+            _ => "Studio",
         };
         fields.push(EmbedField {
             name: label.into(),
