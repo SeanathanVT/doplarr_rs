@@ -20,9 +20,7 @@ use tracing_subscriber::EnvFilter;
 use twilight_cache_inmemory::{DefaultInMemoryCache, ResourceType};
 use twilight_gateway::{Event, EventTypeFlags, Intents, Shard, ShardId, StreamExt as _};
 use twilight_http::Client as HttpClient;
-use twilight_model::application::interaction::{
-    InteractionData, application_command::CommandOptionValue,
-};
+use twilight_model::application::interaction::InteractionData;
 
 pub mod args;
 pub mod config;
@@ -86,14 +84,40 @@ async fn main() -> anyhow::Result<()> {
         bail!("At least one media backend is required!");
     }
 
-    // Check that all media types are unique
-    let mut media_types = HashSet::new();
-    if !config
+    // Check that every backend occupies a distinct slot in the command tree
+    let command_paths: Vec<discord::CommandPath<'_>> = config
         .backends
         .iter()
-        .all(|x| media_types.insert(x.media.as_str()))
+        .map(|x| discord::CommandPath {
+            group: x.group.as_deref(),
+            media: x.media.as_str(),
+        })
+        .collect();
+
+    let mut command_keys = HashSet::new();
+    for path in &command_paths {
+        let key = path.key();
+        if !command_keys.insert(key.clone()) {
+            bail!(
+                "Two backends both map to '/{} {key}'",
+                discord::TOP_LEVEL_COMMAND_NAME
+            );
+        }
+    }
+
+    // Discord rejects a command carrying two options with the same name, so a
+    // group can't share a name with a top-level media command
+    let flat: HashSet<&str> = command_paths
+        .iter()
+        .filter(|p| p.group.is_none())
+        .map(|p| p.media)
+        .collect();
+    if let Some(name) = command_paths
+        .iter()
+        .filter_map(|p| p.group)
+        .find(|group| flat.contains(group))
     {
-        bail!("There must only be one of each media type");
+        bail!("'{name}' is used as both a media type and a group name; they must be distinct");
     }
 
     // Build the HTTP request client for backend calls with a reasonable timeout
@@ -102,9 +126,14 @@ async fn main() -> anyhow::Result<()> {
         .connect_timeout(Duration::from_secs(10))
         .build()?;
 
-    // Connect to all available backends, cast into trait objects, and associate with their media types
-    let mut backends = HashMap::new();
-    for Backend { media, config } in &config.backends {
+    // Connect to all available backends, cast into trait objects, and associate with their command keys
+    let mut backends: HashMap<String, Arc<dyn MediaBackend>> = HashMap::new();
+    for Backend {
+        media,
+        group,
+        config,
+    } in &config.backends
+    {
         let backend: Arc<dyn MediaBackend> = match config {
             BackendConfig::Radarr { .. } => {
                 Arc::new(Radarr::connect(config.clone(), backend_http.clone()).await?)
@@ -119,7 +148,14 @@ async fn main() -> anyhow::Result<()> {
                 Arc::new(Sportarr::connect(config.clone(), backend_http.clone()).await?)
             }
         };
-        backends.insert(media.as_str(), backend);
+        backends.insert(
+            discord::CommandPath {
+                group: group.as_deref(),
+                media: media.as_str(),
+            }
+            .key(),
+            backend,
+        );
     }
 
     // We listen for interactions, plus guild events so we can register commands
@@ -136,8 +172,8 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // Build the list of media types we'll register commands for
-    info!("Available backends: {:?}", media_types);
-    let command = discord::commands(media_types.iter().copied());
+    info!("Available backends: {:?}", command_keys);
+    let command = discord::commands(command_paths.iter().copied());
 
     // Cache interactions
     let cache = DefaultInMemoryCache::builder()
@@ -220,17 +256,8 @@ async fn main() -> anyhow::Result<()> {
                     Some(InteractionData::ApplicationCommand(command_data)) => {
                         debug!(data = ?command_data, "Got application command");
                         // New interaction
-                        // We now dispatch on the "name" of the interaction which selects the media kind, called with the query string
-                        let (media_kind, query) = if command_data.name
-                            == discord::TOP_LEVEL_COMMAND_NAME
-                            && let Some(subcommand) = command_data.options.first()
-                            && let CommandOptionValue::SubCommand(x) = &subcommand.value
-                            && let Some(option) = x.first()
-                            && option.name == discord::QUERY_COMMAND_NAME
-                            && let CommandOptionValue::String(value) = &option.value
-                        {
-                            (subcommand.name.clone(), value.clone())
-                        } else {
+                        // We now dispatch on the command path, which selects the media kind, called with the query string
+                        let Some((media_kind, query)) = discord::parse_command(command_data) else {
                             warn!(data = ?command_data, "Interaction body didn't match what we expected",);
                             continue;
                         };

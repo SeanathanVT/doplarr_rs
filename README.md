@@ -10,7 +10,7 @@
 
 A Discord bot for requesting media through \*arr backends, written in Rust.
 
-Each backend you configure creates a `/request <media>` slash command — e.g. `/request movie` and `/request series`.
+Each backend you configure creates a `/request <media>` slash command — e.g. `/request movie` and `/request series`. Backends can also be grouped, nesting related commands one level deeper.
 
 ## Screenshots
 
@@ -76,7 +76,7 @@ api_key = "your_sonarr_api_key"
 
 Each `[[backends]]` block adds one `/request <media>` command. Any option you
 leave out (quality profile, root folder, …) is simply asked for in Discord at
-request time.
+request time. Add an optional `group` to nest a command one level deeper.
 
 That's all most setups need. For the **full list of options** — plus Seerr, 4K,
 anime, and pointing several commands at one instance — see the annotated
@@ -160,7 +160,7 @@ cargo build --release
 **Config parse errors**
 - Validate your TOML syntax (e.g. [jsonformatter.org/toml-validator](https://jsonformatter.org/toml-validator))
 - `discord_token` and at least one `[[backends]]` entry are required
-- Each backend's `media` value must be unique
+- Each backend's `media` value must be unique within its `group` (or across all backends if no group is set)
 
 ## Migrating from the Clojure version
 

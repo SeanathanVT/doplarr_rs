@@ -37,7 +37,8 @@ public_followup = true
 # Each [[backends]] entry creates a Discord slash command: /request <media>
 #
 # Key concepts:
-# - "media" is the slash command name (must be unique)
+# - "media" is the slash command name (must be unique within its group)
+# - "group" is optional and nests the command one level deeper
 # - You can have multiple backends of the same type (Radarr/Sonarr)
 # - Backends can point to the same instance with different settings
 #

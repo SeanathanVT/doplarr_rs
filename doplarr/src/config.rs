@@ -15,6 +15,10 @@ pub struct Config {
 #[derive(Deserialize, Serialize, Debug, PartialEq, Eq, Clone)]
 pub struct Backend {
     pub media: String,
+    /// Nest this backend's command under a shared group: `group = "music"` with
+    /// `media = "artist"` registers `/request music artist`. Absent gives a
+    /// top-level `/request <media>`.
+    pub group: Option<String>,
     pub config: BackendConfig,
 }
 
@@ -355,6 +359,7 @@ mod tests {
             discord_token: "abc123".to_string(),
             backends: vec![Backend {
                 media: "movie".to_string(),
+                group: None,
                 config: BackendConfig::Radarr {
                     url: "http://1.2.3.4:7878".to_string(),
                     api_key: "abc123".to_string(),
@@ -392,6 +397,7 @@ mod tests {
             discord_token: "abc123".to_string(),
             backends: vec![Backend {
                 media: "media".to_string(),
+                group: None,
                 config: BackendConfig::Seerr {
                     url: "http://1.2.3.4:5055".to_string(),
                     api_key: "abc123".to_string(),
