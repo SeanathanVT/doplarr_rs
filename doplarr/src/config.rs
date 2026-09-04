@@ -16,10 +16,6 @@ pub struct Config {
 #[derive(Deserialize, Serialize, Debug, PartialEq, Eq, Clone)]
 pub struct Backend {
     pub media: String,
-    /// Nest this backend's command under a shared group: `group = "music"` with
-    /// `media = "artist"` registers `/request music artist`. Absent gives a
-    /// top-level `/request <media>`.
-    pub group: Option<String>,
     pub config: BackendConfig,
 }
 
@@ -30,10 +26,9 @@ pub enum MediaKind {
     Tv,
 }
 
-#[derive(Deserialize, Serialize, Debug, PartialEq, Eq, Clone, Copy, Default)]
+#[derive(Deserialize, Serialize, Debug, PartialEq, Eq, Clone, Copy)]
 #[serde(rename_all = "lowercase")]
 pub enum LidarrSearchMode {
-    #[default]
     Artist,
     Album,
 }
@@ -98,7 +93,8 @@ pub enum BackendConfig {
         /// requester picks. Ignored for artists already in the library, which
         /// get an album picker instead.
         monitor_type: Option<LidarrMonitor>,
-        /// Search for artists or for individual albums (default: artist)
+        /// Restrict search results to artists or to albums.
+        /// When absent, both are returned from a single command.
         search_mode: Option<LidarrSearchMode>,
     },
 }
@@ -147,24 +143,12 @@ discord_token = "your_discord_bot_token"
 # api_key = "${SPORTARR_API_KEY}"
 
 # --- Lidarr ---
-# `group` nests these as /request music artist and /request music album.
 # [[backends]]
-# media = "artist"
-# group = "music"
+# media = "music"
 #
 # [backends.config.Lidarr]
 # url = "http://localhost:8686"
 # api_key = "${LIDARR_API_KEY}"
-# search_mode = "artist"
-
-# [[backends]]
-# media = "album"
-# group = "music"
-#
-# [backends.config.Lidarr]
-# url = "http://localhost:8686"
-# api_key = "${LIDARR_API_KEY}"
-# search_mode = "album"
 "#;
 
 /// Expand `${VAR}` references against the process environment. Expansion
@@ -405,7 +389,6 @@ mod tests {
             discord_token: "abc123".to_string(),
             backends: vec![Backend {
                 media: "movie".to_string(),
-                group: None,
                 config: BackendConfig::Radarr {
                     url: "http://1.2.3.4:7878".to_string(),
                     api_key: "abc123".to_string(),
@@ -443,7 +426,6 @@ mod tests {
             discord_token: "abc123".to_string(),
             backends: vec![Backend {
                 media: "media".to_string(),
-                group: None,
                 config: BackendConfig::Seerr {
                     url: "http://1.2.3.4:5055".to_string(),
                     api_key: "abc123".to_string(),
@@ -468,7 +450,6 @@ mod tests {
 
            [[backends]]
            media = "artist"
-           group = "music"
 
            [backends.config.Lidarr]
            url = "http://1.2.3.4:8686"
@@ -485,7 +466,6 @@ mod tests {
             discord_token: "abc123".to_string(),
             backends: vec![Backend {
                 media: "artist".to_string(),
-                group: Some("music".to_string()),
                 config: BackendConfig::Lidarr {
                     url: "http://1.2.3.4:8686".to_string(),
                     api_key: "abc123".to_string(),
@@ -501,6 +481,29 @@ mod tests {
         };
 
         assert_eq!(config, expected);
+    }
+
+    #[test]
+    fn test_parse_lidarr_config_without_search_mode() {
+        // Omitted means both artists and albums from one command
+        let config: Config = toml::from_str(
+            r#"
+           discord_token = "abc123"
+
+           [[backends]]
+           media = "music"
+
+           [backends.config.Lidarr]
+           url = "http://1.2.3.4:8686"
+           api_key = "abc123"
+        "#,
+        )
+        .unwrap();
+
+        let BackendConfig::Lidarr { search_mode, .. } = &config.backends[0].config else {
+            panic!("expected a Lidarr backend");
+        };
+        assert_eq!(*search_mode, None);
     }
 
     #[test]

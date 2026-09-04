@@ -22,7 +22,8 @@ use lidarr_api::{
     commands::AlbumSearchCommand,
     models::{
         AddAlbumOptions, AddArtistOptions, AlbumAddType, AlbumResource, AlbumsMonitoredResource,
-        ArtistResource, MonitorTypes, NewItemMonitorTypes, RootFolderResource,
+        ArtistResource, MediaCover, MediaCoverTypes, MonitorTypes, NewItemMonitorTypes,
+        RootFolderResource,
     },
 };
 use tracing::{debug, error, info, trace, warn};
@@ -79,8 +80,8 @@ pub struct Lidarr {
     /// Monitor scopes offered when adding a new artist; a config pin collapses
     /// this to a single entry the requester never has to touch
     monitor: Vec<MonitorTypes>,
-    /// Whether this backend searches artists or individual albums
-    search_mode: LidarrSearchMode,
+    /// Restricts search to one kind; `None` searches both
+    search_mode: Option<LidarrSearchMode>,
     add_settings: AddSettings,
 }
 
@@ -189,7 +190,7 @@ impl Lidarr {
         metadata_profile: Option<String>,
         rootfolder: Option<String>,
         monitor_type: Option<MonitorTypes>,
-        search_mode: LidarrSearchMode,
+        search_mode: Option<LidarrSearchMode>,
         client: reqwest::Client,
     ) -> Result<Self> {
         // Log connection before moving base_path
@@ -310,7 +311,7 @@ impl Lidarr {
                 metadata_profile,
                 rootfolder,
                 monitor_type,
-                search_mode.unwrap_or_default(),
+                search_mode,
                 client,
             )
             .await
@@ -685,26 +686,59 @@ fn album_artist_name(album: &AlbumResource) -> Option<String> {
         .and_then(|artist| artist.artist_name.clone().flatten())
 }
 
+/// Discard anything Discord would reject as a thumbnail.
+///
+/// Lidarr rewrites `remoteUrl` to the local file it cached the cover into once
+/// the media is in the library, so a value like `/data/MediaCover/2/poster.jpg`
+/// comes back where a URL is expected. Sending that fails the whole component
+/// with `URL_TYPE_INVALID_URL`, taking the interaction down with it, so anything
+/// that isn't absolute is dropped in favour of no thumbnail at all.
+fn usable_url(candidate: Option<String>) -> Option<String> {
+    candidate.filter(|url| url.starts_with("https://") || url.starts_with("http://"))
+}
+
+/// The best usable image of the wanted kind, else any other usable one.
+///
+/// Lidarr returns several cover types per item and does not order them, so
+/// without a preference the first entry is whatever the metadata source listed
+/// first, typically a clearlogo rather than the artwork.
+fn cover_url(images: Option<Vec<MediaCover>>, preferred: MediaCoverTypes) -> Option<String> {
+    let images = images?;
+    let usable = |cover: &MediaCover| usable_url(cover.remote_url.clone().flatten());
+
+    images
+        .iter()
+        .find(|cover| cover.cover_type == Some(preferred))
+        .and_then(usable)
+        .or_else(|| images.iter().find_map(usable))
+}
+
 /// The best available cover art for an album
 fn album_cover(album: &AlbumResource) -> Option<String> {
-    album.remote_cover.clone().flatten().or_else(|| {
-        album.images.clone().flatten().and_then(|images| {
-            images
-                .into_iter()
-                .find_map(|image| image.remote_url.flatten())
-        })
-    })
+    usable_url(album.remote_cover.clone().flatten())
+        .or_else(|| cover_url(album.images.clone().flatten(), MediaCoverTypes::Cover))
 }
 
 /// The best available image for an artist
 fn artist_poster(artist: &ArtistResource) -> Option<String> {
-    artist.remote_poster.clone().flatten().or_else(|| {
-        artist.images.clone().flatten().and_then(|images| {
-            images
-                .into_iter()
-                .find_map(|image| image.remote_url.flatten())
-        })
-    })
+    usable_url(artist.remote_poster.clone().flatten())
+        .or_else(|| cover_url(artist.images.clone().flatten(), MediaCoverTypes::Poster))
+}
+
+/// Alternate between artist and album hits, keeping each list's own relevance
+/// order. Concatenating instead would let Discord's option cap truncate one kind
+/// away entirely on a broad search.
+fn interleave(artists: Vec<LidarrMedia>, albums: Vec<LidarrMedia>) -> Vec<LidarrMedia> {
+    let mut merged = Vec::with_capacity(artists.len() + albums.len());
+    let mut artists = artists.into_iter();
+    let mut albums = albums.into_iter();
+    loop {
+        match (artists.next(), albums.next()) {
+            (None, None) => break,
+            (artist, album) => merged.extend(artist.into_iter().chain(album)),
+        }
+    }
+    merged
 }
 
 /// Returns the requested albums that aren't already monitored on the artist.
@@ -809,37 +843,54 @@ impl TryFrom<Vec<RequestDetails>> for SelectedDetails {
 impl MediaItem for LidarrMedia {
     fn to_dropdown(&self) -> DropdownOption {
         match self {
-            Self::Artist(artist) => DropdownOption {
-                title: artist.artist_name.clone().flatten().unwrap_or_default(),
+            Self::Artist(artist) => {
                 // Disambiguation is what MusicBrainz uses to tell same-named
-                // artists apart, so it's the most useful subtitle when present
-                description: artist
+                // artists apart, so it leads when present
+                let mut tags = Vec::new();
+                if let Some(detail) = artist
                     .disambiguation
                     .clone()
                     .flatten()
                     .filter(|d| !d.is_empty())
-                    .or_else(|| artist.artist_type.clone().flatten()),
-                id: artist.id.map(SelectableId::Integer),
-            },
+                    .or_else(|| artist.artist_type.clone().flatten())
+                {
+                    tags.push(detail);
+                }
+                // Artists deliberately don't early-stop, so this is the only
+                // warning that picking this one changes a library entry rather
+                // than adding something new. Lidarr's own search marks these too.
+                if artist.id.is_some_and(|id| id > 0) {
+                    tags.push("In library".to_string());
+                }
+
+                DropdownOption {
+                    title: artist.artist_name.clone().flatten().unwrap_or_default(),
+                    description: (!tags.is_empty()).then(|| tags.join(" · ")),
+                    id: artist.id.map(SelectableId::Integer),
+                }
+            }
             Self::Album(album) => {
-                // Album titles repeat across artists, so the artist is the part
-                // that makes a result identifiable
-                let mut tags = Vec::new();
+                // Leading with the release type doubles as the kind marker when
+                // artists and albums share one list. The artist follows, since
+                // album titles repeat across artists.
+                let mut tags = vec![
+                    album
+                        .album_type
+                        .clone()
+                        .flatten()
+                        .filter(|t| !t.is_empty())
+                        .unwrap_or_else(|| "Album".to_string()),
+                ];
                 if let Some(artist) = album_artist_name(album) {
                     tags.push(artist);
                 }
                 if let Some(year) = release_date(album).map(|date| date.year()) {
                     tags.push(year.to_string());
                 }
-                if let Some(album_type) =
-                    album.album_type.clone().flatten().filter(|t| !t.is_empty())
-                {
-                    tags.push(album_type);
-                }
 
                 DropdownOption {
                     title: album.title.clone().flatten().unwrap_or_default(),
-                    description: (!tags.is_empty()).then(|| tags.join(" · ")),
+                    description: Some(tags.join(" · ")),
                     id: album.id.map(SelectableId::Integer),
                 }
             }
@@ -858,34 +909,70 @@ impl MediaItem for LidarrMedia {
 #[async_trait]
 impl MediaBackend for Lidarr {
     async fn search(&self, term: &str) -> Result<Vec<Box<dyn MediaItem>>> {
-        match self.search_mode {
-            LidarrSearchMode::Artist => {
-                info!("Searching Lidarr for artist: {}", term);
-                let results = api_v1_artist_lookup_get(&self.config, Some(term))
+        let artists = self.search_mode != Some(LidarrSearchMode::Album);
+        let albums = self.search_mode != Some(LidarrSearchMode::Artist);
+        info!(artists, albums, "Searching Lidarr for: {}", term);
+
+        // Both hit the same instance, so run them together and let either failure
+        // sink the search rather than half-reporting
+        let (artist_hits, album_hits) = tokio::join!(
+            async {
+                if !artists {
+                    return Ok(Vec::new());
+                }
+                api_v1_artist_lookup_get(&self.config, Some(term))
                     .await
-                    .inspect_err(|e| {
-                        log_api_error(e, "Failed to search Lidarr for artists");
-                    })?;
-                debug!("Found {} artist results", results.len());
-                Ok(results
-                    .into_iter()
-                    .map(|a| Box::new(LidarrMedia::Artist(a)) as Box<dyn MediaItem>)
-                    .collect())
-            }
-            LidarrSearchMode::Album => {
-                info!("Searching Lidarr for album: {}", term);
-                let results = api_v1_album_lookup_get(&self.config, Some(term))
+                    .inspect_err(|e| log_api_error(e, "Failed to search Lidarr for artists"))
+            },
+            async {
+                if !albums {
+                    return Ok(Vec::new());
+                }
+                api_v1_album_lookup_get(&self.config, Some(term))
                     .await
-                    .inspect_err(|e| {
-                        log_api_error(e, "Failed to search Lidarr for albums");
-                    })?;
-                debug!("Found {} album results", results.len());
-                Ok(results
-                    .into_iter()
-                    .map(|a| Box::new(LidarrMedia::Album(a)) as Box<dyn MediaItem>)
-                    .collect())
+                    .inspect_err(|e| log_api_error(e, "Failed to search Lidarr for albums"))
             }
+        );
+
+        let artist_hits: Vec<LidarrMedia> =
+            artist_hits?.into_iter().map(LidarrMedia::Artist).collect();
+        let album_hits: Vec<LidarrMedia> =
+            album_hits?.into_iter().map(LidarrMedia::Album).collect();
+        debug!(
+            artists = artist_hits.len(),
+            albums = album_hits.len(),
+            "Found results"
+        );
+
+        Ok(interleave(artist_hits, album_hits)
+            .into_iter()
+            .map(|m| Box::new(m) as Box<dyn MediaItem>)
+            .collect())
+    }
+
+    fn to_dropdown_options(&self, results: &[Box<dyn MediaItem>]) -> Vec<DropdownOption> {
+        // A filtered command says which kind it searches in its own name, so the
+        // tag only earns its place when both kinds share one list
+        if self.search_mode.is_some() {
+            return results.iter().map(|x| x.to_dropdown()).collect();
         }
+
+        results
+            .iter()
+            .filter_map(|r| r.as_any().downcast_ref::<LidarrMedia>())
+            .map(|media| {
+                let mut option = media.to_dropdown();
+                // Albums already lead with their release type, so only artists
+                // need saying out loud
+                if let LidarrMedia::Artist(_) = media {
+                    option.description = Some(match option.description {
+                        Some(rest) => format!("Artist · {rest}"),
+                        None => "Artist".to_string(),
+                    });
+                }
+                option
+            })
+            .collect()
     }
 
     fn early_stop(&self, media: &dyn MediaItem) -> bool {
@@ -1244,7 +1331,7 @@ mod tests {
     }
 
     /// A backend with no live connection, for `early_stop` decisions.
-    fn test_lidarr(search_mode: LidarrSearchMode) -> Lidarr {
+    fn test_lidarr(search_mode: Option<LidarrSearchMode>) -> Lidarr {
         // Skip system CA loading so the test works in sandboxed environments (e.g. Nix).
         let client = reqwest::ClientBuilder::new()
             .danger_accept_invalid_certs(true)
@@ -1274,7 +1361,7 @@ mod tests {
     fn early_stop_lets_an_unmonitored_album_through() {
         // Adding an artist gives Lidarr a row for their whole discography, so an
         // id alone must not read as "already requested"
-        let lidarr = test_lidarr(LidarrSearchMode::Album);
+        let lidarr = test_lidarr(Some(LidarrSearchMode::Album));
         let media = LidarrMedia::Album(AlbumResource {
             id: Some(42),
             monitored: Some(false),
@@ -1285,7 +1372,7 @@ mod tests {
 
     #[test]
     fn early_stop_halts_on_a_monitored_album() {
-        let lidarr = test_lidarr(LidarrSearchMode::Album);
+        let lidarr = test_lidarr(Some(LidarrSearchMode::Album));
         let media = LidarrMedia::Album(AlbumResource {
             id: Some(42),
             monitored: Some(true),
@@ -1297,7 +1384,7 @@ mod tests {
     #[test]
     fn early_stop_never_halts_on_an_artist() {
         // An artist in the library still has albums worth requesting
-        let lidarr = test_lidarr(LidarrSearchMode::Artist);
+        let lidarr = test_lidarr(Some(LidarrSearchMode::Artist));
         let media = LidarrMedia::Artist(ArtistResource {
             id: Some(42),
             monitored: Some(true),
@@ -1331,6 +1418,183 @@ mod tests {
         });
         assert_eq!(option.title, "Untitled");
         assert!(option.description.is_none());
+    }
+
+    fn artist(name: &str) -> LidarrMedia {
+        LidarrMedia::Artist(ArtistResource {
+            artist_name: Some(Some(name.to_string())),
+            ..ArtistResource::new()
+        })
+    }
+
+    fn album_item(title: &str) -> LidarrMedia {
+        LidarrMedia::Album(AlbumResource {
+            title: Some(Some(title.to_string())),
+            album_type: Some(Some("Album".to_string())),
+            ..AlbumResource::new()
+        })
+    }
+
+    fn titles(media: &[LidarrMedia]) -> Vec<String> {
+        media.iter().map(|m| m.to_dropdown().title).collect()
+    }
+
+    fn cover(kind: MediaCoverTypes, remote_url: &str) -> MediaCover {
+        MediaCover {
+            cover_type: Some(kind),
+            remote_url: Some(Some(remote_url.to_string())),
+            ..MediaCover::new()
+        }
+    }
+
+    fn artist_with_images(images: Vec<MediaCover>) -> ArtistResource {
+        ArtistResource {
+            images: Some(Some(images)),
+            ..ArtistResource::new()
+        }
+    }
+
+    #[test]
+    fn a_cached_cover_path_is_not_offered_to_discord() {
+        // Lidarr hands back the local file once the media is in the library, and
+        // Discord rejects the whole component if that reaches it
+        let artist = artist_with_images(vec![cover(
+            MediaCoverTypes::Poster,
+            "/opt/lidarr-data/MediaCover/2/poster.jpg",
+        )]);
+        assert_eq!(artist_poster(&artist), None);
+    }
+
+    #[test]
+    fn the_poster_wins_over_whatever_lidarr_lists_first() {
+        let artist = artist_with_images(vec![
+            cover(
+                MediaCoverTypes::Clearlogo,
+                "https://example.invalid/logo.png",
+            ),
+            cover(
+                MediaCoverTypes::Poster,
+                "https://example.invalid/poster.jpg",
+            ),
+        ]);
+        assert_eq!(
+            artist_poster(&artist).as_deref(),
+            Some("https://example.invalid/poster.jpg")
+        );
+    }
+
+    #[test]
+    fn any_usable_cover_beats_no_thumbnail() {
+        // No poster, but a real URL is still better than nothing
+        let artist = artist_with_images(vec![cover(
+            MediaCoverTypes::Clearlogo,
+            "https://example.invalid/logo.png",
+        )]);
+        assert_eq!(
+            artist_poster(&artist).as_deref(),
+            Some("https://example.invalid/logo.png")
+        );
+    }
+
+    #[test]
+    fn a_remote_poster_is_still_preferred_when_it_is_a_url() {
+        let artist = ArtistResource {
+            remote_poster: Some(Some("https://example.invalid/remote.jpg".to_string())),
+            ..artist_with_images(vec![cover(
+                MediaCoverTypes::Poster,
+                "https://example.invalid/poster.jpg",
+            )])
+        };
+        assert_eq!(
+            artist_poster(&artist).as_deref(),
+            Some("https://example.invalid/remote.jpg")
+        );
+    }
+
+    #[test]
+    fn an_artist_already_in_the_library_says_so() {
+        let media = LidarrMedia::Artist(ArtistResource {
+            id: Some(7),
+            artist_type: Some(Some("Group".to_string())),
+            ..ArtistResource::new()
+        });
+        assert_eq!(
+            media.to_dropdown().description.as_deref(),
+            Some("Group · In library")
+        );
+    }
+
+    #[test]
+    fn an_artist_lidarr_does_not_have_is_unmarked() {
+        // A lookup miss reports id 0 rather than omitting it, so both must read
+        // as "not in the library"
+        for id in [None, Some(0)] {
+            let media = LidarrMedia::Artist(ArtistResource {
+                id,
+                artist_type: Some(Some("Group".to_string())),
+                ..ArtistResource::new()
+            });
+            assert_eq!(media.to_dropdown().description.as_deref(), Some("Group"));
+        }
+    }
+
+    #[test]
+    fn interleave_alternates_between_the_two_lists() {
+        // Truncation to Discord's cap must not be able to drop one kind entirely
+        let merged = interleave(
+            vec![artist("A1"), artist("A2")],
+            vec![album_item("B1"), album_item("B2")],
+        );
+        assert_eq!(titles(&merged), ["A1", "B1", "A2", "B2"]);
+    }
+
+    #[test]
+    fn interleave_appends_the_longer_lists_tail() {
+        let merged = interleave(
+            vec![artist("A1")],
+            vec![album_item("B1"), album_item("B2"), album_item("B3")],
+        );
+        assert_eq!(titles(&merged), ["A1", "B1", "B2", "B3"]);
+    }
+
+    #[test]
+    fn interleave_handles_an_empty_side() {
+        assert_eq!(titles(&interleave(vec![], vec![album_item("B1")])), ["B1"]);
+        assert_eq!(titles(&interleave(vec![artist("A1")], vec![])), ["A1"]);
+        assert!(interleave(vec![], vec![]).is_empty());
+    }
+
+    #[test]
+    fn combined_search_tags_each_result_with_its_kind() {
+        let lidarr = test_lidarr(None);
+        let results: Vec<Box<dyn MediaItem>> = vec![
+            Box::new(artist("Bad Religion")),
+            Box::new(album_item("Hypercaffium Spazzinate")),
+        ];
+        let options = lidarr.to_dropdown_options(&results);
+        assert!(
+            options[0]
+                .description
+                .as_deref()
+                .unwrap()
+                .starts_with("Artist"),
+            "{:?}",
+            options[0].description
+        );
+        // Albums announce themselves through their release type, not a second tag
+        assert_eq!(options[1].description.as_deref(), Some("Album"));
+    }
+
+    #[test]
+    fn a_filtered_search_leaves_the_subtitle_alone() {
+        // The command name already says which kind it searches
+        let lidarr = test_lidarr(Some(LidarrSearchMode::Artist));
+        let results: Vec<Box<dyn MediaItem>> = vec![Box::new(artist("Bad Religion"))];
+        let tagged = lidarr.to_dropdown_options(&results);
+        assert_eq!(
+            tagged[0].description,
+            artist("Bad Religion").to_dropdown().description
+        );
     }
 
     fn rootfolder(path: &str, quality: i32, metadata: i32) -> RootFolderResource {

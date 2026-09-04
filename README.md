@@ -10,7 +10,7 @@
 
 A Discord bot for requesting media through \*arr backends, written in Rust.
 
-Each backend you configure creates a `/request <media>` slash command — e.g. `/request movie` and `/request series`. Backends can also be grouped, giving nested commands like `/request music artist`.
+Each backend you configure creates a `/request <media>` slash command — e.g. `/request movie` and `/request series`.
 
 ## Screenshots
 
@@ -76,8 +76,7 @@ api_key = "your_sonarr_api_key"
 
 Each `[[backends]]` block adds one `/request <media>` command. Any option you
 leave out (quality profile, root folder, …) is simply asked for in Discord at
-request time. Add an optional `group` to nest a command one level deeper, so
-`media = "artist"` with `group = "music"` becomes `/request music artist`.
+request time.
 
 That's all most setups need. For the **full list of options** — plus Seerr, 4K,
 anime, music, and pointing several commands at one instance — see the annotated
@@ -102,17 +101,18 @@ anime, music, and pointing several commands at one instance — see the annotate
 
 ### Using Lidarr
 
-A Lidarr backend searches either artists or albums, set by `search_mode`. Most
-setups want both, nested under one `group` as `/request music artist` and
-`/request music album`.
+One Lidarr backend covers both artists and albums from a single command, with
+each result tagged in the dropdown. Set `search_mode` to `artist` or `album` if
+you would rather split them into two commands.
 
 > [!NOTE]
-> Lidarr can't list the albums of an artist it hasn't added yet, so artist mode
-> asks how much of a new artist's discography to monitor (the same choice
-> Lidarr's own Add Artist screen offers). Once the artist is in your library,
-> requesting them again brings up an album picker instead. To request one
-> specific record by an artist you don't have, use album mode: it adds the
-> artist as a side effect and monitors only that album.
+> Lidarr can't list the albums of an artist it hasn't added yet, which shapes
+> what you're asked. Pick an artist Lidarr doesn't have and it asks how much of
+> their discography to monitor, the same choice Lidarr's own Add Artist screen
+> offers. Pick one already in your library, marked as such in the results, and
+> you get an album picker instead. Pick an album and just that record is
+> requested, with Lidarr adding the artist if it needs to, which is the only way
+> to get a single album by an artist you don't already have.
 
 ## Running as a Service
 
@@ -175,7 +175,7 @@ cargo build --release
 **Config parse errors**
 - Validate your TOML syntax (e.g. [jsonformatter.org/toml-validator](https://jsonformatter.org/toml-validator))
 - `discord_token` and at least one `[[backends]]` entry are required
-- Each backend's `media` value must be unique within its `group` (or across all backends if no group is set)
+- Each backend's `media` value must be unique
 
 ## Migrating from the Clojure version
 

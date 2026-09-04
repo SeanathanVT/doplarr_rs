@@ -10,10 +10,7 @@ use twilight_http::Client as HttpClient;
 use twilight_model::{
     application::{
         command::{Command, CommandType},
-        interaction::{
-            application_command::{CommandData, CommandOptionValue},
-            message_component::MessageComponentInteractionData,
-        },
+        interaction::message_component::MessageComponentInteractionData,
     },
     channel::message::{
         Component, MessageFlags,
@@ -28,7 +25,7 @@ use twilight_model::{
 };
 use twilight_util::builder::{
     InteractionResponseDataBuilder,
-    command::{CommandBuilder, StringBuilder, SubCommandBuilder, SubCommandGroupBuilder},
+    command::{CommandBuilder, StringBuilder, SubCommandBuilder},
     message::{
         ActionRowBuilder, ButtonBuilder, ContainerBuilder, SectionBuilder, SelectMenuBuilder,
         SelectMenuOptionBuilder, SeparatorBuilder, TextDisplayBuilder, ThumbnailBuilder,
@@ -71,92 +68,21 @@ fn truncate_text(text: &str) -> String {
     format!("{}...", &text[..end])
 }
 
-/// Where a backend sits in the slash-command tree: `/request <media>`, or
-/// `/request <group> <media>` when the backend declares a group.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CommandPath<'a> {
-    pub group: Option<&'a str>,
-    pub media: &'a str,
-}
-
-impl CommandPath<'_> {
-    /// The key backends are registered and dispatched under, e.g. `movie` or
-    /// `music artist`. Discord names can't contain spaces, so joining on one
-    /// can't collide with a media type.
-    pub fn key(&self) -> String {
-        match self.group {
-            Some(group) => format!("{group} {}", self.media),
-            None => self.media.to_string(),
-        }
-    }
-}
-
 /// Build the comand object, used to register with Discord what slash commands are available
-pub fn commands<'a>(paths: impl IntoIterator<Item = CommandPath<'a>>) -> Command {
+pub fn commands<T: AsRef<str>>(media_kinds: impl IntoIterator<Item = T>) -> Command {
     let query = StringBuilder::new(QUERY_COMMAND_NAME, "search query").required(true);
     let mut request_command = CommandBuilder::new(
         TOP_LEVEL_COMMAND_NAME,
         "Request media",
         CommandType::ChatInput,
     );
-
-    // Discord takes a group with all of its subcommands at once, so grouped
-    // backends are gathered before any of them is added to the command.
-    let mut groups: Vec<(&str, Vec<SubCommandBuilder>)> = Vec::new();
-
-    for path in paths {
-        let subcommand = SubCommandBuilder::new(path.media, format!("Request {}", path.media))
-            .option(query.clone());
-        match path.group {
-            None => request_command = request_command.option(subcommand),
-            Some(group) => match groups.iter_mut().find(|(name, _)| *name == group) {
-                Some((_, subcommands)) => subcommands.push(subcommand),
-                None => groups.push((group, vec![subcommand])),
-            },
-        }
-    }
-
-    for (group, subcommands) in groups {
+    for kind in media_kinds {
         request_command = request_command.option(
-            SubCommandGroupBuilder::new(group, format!("Request {group}")).subcommands(subcommands),
-        );
+            SubCommandBuilder::new(kind.as_ref(), format!("Request {}", kind.as_ref()))
+                .option(query.clone()),
+        )
     }
-
     request_command.build()
-}
-
-/// Pull the dispatch key and search query out of an application command.
-///
-/// Covers both shapes we register: `/request <media>` arrives as a subcommand,
-/// `/request <group> <media>` as a subcommand group wrapping one. Returns
-/// `None` for anything that doesn't match, which the caller logs and skips.
-pub fn parse_command(data: &CommandData) -> Option<(String, String)> {
-    if data.name != TOP_LEVEL_COMMAND_NAME {
-        return None;
-    }
-
-    let first = data.options.first()?;
-    let (key, options) = match &first.value {
-        CommandOptionValue::SubCommand(options) => (first.name.clone(), options),
-        CommandOptionValue::SubCommandGroup(options) => {
-            let sub = options.first()?;
-            let CommandOptionValue::SubCommand(options) = &sub.value else {
-                return None;
-            };
-            (format!("{} {}", first.name, sub.name), options)
-        }
-        _ => return None,
-    };
-
-    let query = options
-        .iter()
-        .find(|option| option.name == QUERY_COMMAND_NAME)
-        .and_then(|option| match &option.value {
-            CommandOptionValue::String(value) => Some(value.clone()),
-            _ => None,
-        })?;
-
-    Some((key, query))
 }
 
 /// Updates an existing interaction with a new component (ephemeral and supporting V2 components)
@@ -596,8 +522,8 @@ pub struct InteractionStart {
     pub uuid: Uuid,
     pub rx: Receiver<InteractionContinue>,
     pub query: String,
-    /// The backend's command key (e.g. "movie", "music artist") this request
-    /// targets. Carried for log correlation when multiple backends are configured.
+    /// The backend's media command (e.g. "movie", "series") this request targets.
+    /// Carried for log correlation when multiple backends are configured.
     pub media: String,
     pub interaction_id: Id<InteractionMarker>,
     pub application_id: Id<ApplicationMarker>,
@@ -963,148 +889,4 @@ pub async fn run_interaction(
 
     info!("Interaction flow completed successfully");
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use twilight_model::application::{
-        command::CommandOptionType, interaction::application_command::CommandDataOption,
-    };
-
-    fn command_data(options: Vec<CommandDataOption>) -> CommandData {
-        CommandData {
-            guild_id: None,
-            id: Id::new(1),
-            name: TOP_LEVEL_COMMAND_NAME.to_string(),
-            kind: CommandType::ChatInput,
-            options,
-            resolved: None,
-            target_id: None,
-        }
-    }
-
-    fn query_option(query: &str) -> CommandDataOption {
-        CommandDataOption {
-            name: QUERY_COMMAND_NAME.to_string(),
-            value: CommandOptionValue::String(query.to_string()),
-        }
-    }
-
-    /// The payload Discord sends for `/request <media> query:<query>`
-    fn flat(media: &str, query: &str) -> CommandData {
-        command_data(vec![CommandDataOption {
-            name: media.to_string(),
-            value: CommandOptionValue::SubCommand(vec![query_option(query)]),
-        }])
-    }
-
-    /// The payload Discord sends for `/request <group> <media> query:<query>`
-    fn grouped(group: &str, media: &str, query: &str) -> CommandData {
-        command_data(vec![CommandDataOption {
-            name: group.to_string(),
-            value: CommandOptionValue::SubCommandGroup(vec![CommandDataOption {
-                name: media.to_string(),
-                value: CommandOptionValue::SubCommand(vec![query_option(query)]),
-            }]),
-        }])
-    }
-
-    #[test]
-    fn key_joins_a_group_with_its_media() {
-        assert_eq!(
-            CommandPath {
-                group: None,
-                media: "movie"
-            }
-            .key(),
-            "movie"
-        );
-        assert_eq!(
-            CommandPath {
-                group: Some("music"),
-                media: "artist"
-            }
-            .key(),
-            "music artist"
-        );
-    }
-
-    #[test]
-    fn parse_command_reads_a_flat_subcommand() {
-        let (key, query) = parse_command(&flat("movie", "dune")).expect("should parse");
-        assert_eq!(key, "movie");
-        assert_eq!(query, "dune");
-    }
-
-    #[test]
-    fn parse_command_reads_a_grouped_subcommand() {
-        let (key, query) =
-            parse_command(&grouped("music", "artist", "boards of canada")).expect("should parse");
-        // The key has to match what the backend was registered under, or the
-        // interaction dispatches to nothing
-        assert_eq!(
-            key,
-            CommandPath {
-                group: Some("music"),
-                media: "artist"
-            }
-            .key()
-        );
-        assert_eq!(query, "boards of canada");
-    }
-
-    #[test]
-    fn parse_command_rejects_another_applications_command() {
-        let mut data = flat("movie", "dune");
-        data.name = "not-request".to_string();
-        assert!(parse_command(&data).is_none());
-    }
-
-    #[test]
-    fn parse_command_rejects_a_subcommand_with_no_query() {
-        let data = command_data(vec![CommandDataOption {
-            name: "movie".to_string(),
-            value: CommandOptionValue::SubCommand(vec![]),
-        }]);
-        assert!(parse_command(&data).is_none());
-    }
-
-    #[test]
-    fn commands_gathers_grouped_backends_under_a_single_group() {
-        let command = commands([
-            CommandPath {
-                group: None,
-                media: "movie",
-            },
-            CommandPath {
-                group: Some("music"),
-                media: "artist",
-            },
-            CommandPath {
-                group: Some("music"),
-                media: "album",
-            },
-        ]);
-
-        // The flat command stays top-level; both music entries collapse into one group
-        let names: Vec<&str> = command.options.iter().map(|o| o.name.as_str()).collect();
-        assert_eq!(names, vec!["movie", "music"]);
-
-        let music = command
-            .options
-            .iter()
-            .find(|o| o.name == "music")
-            .expect("music group");
-        assert_eq!(music.kind, CommandOptionType::SubCommandGroup);
-
-        let nested: Vec<&str> = music
-            .options
-            .as_ref()
-            .expect("group subcommands")
-            .iter()
-            .map(|o| o.name.as_str())
-            .collect();
-        assert_eq!(nested, vec!["artist", "album"]);
-    }
 }
