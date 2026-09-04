@@ -165,7 +165,7 @@ cargo build --release
 **Backend connection errors**
 - Test your API keys directly in the \*arr web UI
 - If running in Docker, make sure the container can reach your \*arr services (check network/hostname)
-- Quality profile names are case-sensitive and must match exactly what's in Sonarr/Radarr settings
+- Quality profile names are case-sensitive and must match exactly what's in Sonarr/Radarr/Lidarr/Sportarr settings
 
 **Seerr: "user not found" or requests rejected**
 1. Enable the Discord notification agent in Seerr (Settings → Notifications → Discord)

@@ -139,7 +139,7 @@ Doplarr's user-facing surface is the Discord bot. When adding or changing text
 that users see:
 
 1. Be concise and clear, and use as few words as possible to make your point. Prefer minimal, low-noise messages.
-2. Capitalize proper nouns and product names correctly: Discord, Radarr, Sonarr, Seerr, Plex, etc.
+2. Capitalize proper nouns and product names correctly: Discord, Radarr, Sonarr, Seerr, Sportarr, Lidarr, Plex, etc.
 3. Use the appropriate Unicode characters for ellipses, arrows, and other special characters/symbols.
 4. Do your best to check for spelling errors and grammatical mistakes.
 
