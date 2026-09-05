@@ -203,8 +203,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-traits",
  "serde",
+ "wasm-bindgen",
  "windows-link",
 ]
 
@@ -409,7 +411,9 @@ version = "4.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "chrono",
  "clap",
+ "lidarr_api",
  "radarr_api",
  "reqwest",
  "seerr_api",
@@ -1051,6 +1055,19 @@ name = "libc"
 version = "0.2.189"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
+
+[[package]]
+name = "lidarr_api"
+version = "1.0.0"
+dependencies = [
+ "chrono",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_repr",
+ "serde_with",
+ "url",
+]
 
 [[package]]
 name = "linux-raw-sys"

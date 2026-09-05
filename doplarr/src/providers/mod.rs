@@ -25,15 +25,17 @@ impl std::error::Error for UserFacingError {}
 mod api_logging;
 
 // Backend instances
+pub mod lidarr;
 pub mod radarr;
 pub mod seerr;
 pub mod sonarr;
 pub mod sportarr;
 
-/// Sentinel id for an "All Seasons" entry in a season multi-select. Real season
-/// numbers are >= 0, so -1 never collides. The Discord layer treats an option
-/// with this id as mutually exclusive with the rest of the multi-select.
-pub const ALL_SEASONS_ID: i32 = -1;
+/// Sentinel id for an "All ..." entry in a multi-select ("All Seasons",
+/// "All Albums"). Real season numbers and record ids are >= 0, so -1 never
+/// collides. The Discord layer treats an option with this id as mutually
+/// exclusive with the rest of the multi-select.
+pub const ALL_ITEMS_ID: i32 = -1;
 
 /// Represents the different ways we can capture a unique id for a menu selection
 /// Some objects in the backends have unique integer ids, while some are just string sentinel values

@@ -31,6 +31,17 @@ In most cases, you can just remove the offending endpoints if they are unused.
 - `seerr_api/src/apis/search_api.rs`: `search_get` embeds the `query` parameter directly in the URL using `percent-encoding` instead of reqwest's `.query()`. reqwest's `.query()` uses form-encoding (spaces → `+`) but Seerr requires percent-encoding (spaces → `%20`). Marked with `// HAND-PATCHED:` comment.
 - `seerr_api/src/apis/request_api.rs`: `request_post` has an extra `x_api_user: Option<i32>` parameter that sends an `X-API-User` header. Seerr determines auto-approval from the authenticated caller (`req.user`), resolved via this header rather than the body's `userId` field. Without it, Seerr defaults to the admin and all requests are auto-approved. Documented with a `NOTE:` doc comment.
 
+#### Hand-patches to `lidarr_api` (do not overwrite on regen)
+
+- `lidarr_api/src/apis/static_resource_api.rs` is deleted, along with its `pub mod` line in
+  `lidarr_api/src/apis/mod.rs`. The generator emits `format!("{}/", base_path, path = ...)` there, a named
+  argument with no matching specifier, which doesn't compile. The endpoints only serve Lidarr's own web UI
+  assets, so they're removed rather than patched.
+- `lidarr_api/src/apis/command_api.rs`: `api_v1_command_post_custom` is a manual addition, mirroring the
+  same function in `sonarr_api`. `CommandResource` can't express command-specific fields like `albumIds`.
+- `lidarr_api/src/commands.rs` is hand-written (not generated) and holds the `AlbumSearch` and
+  `ArtistSearch` command payloads.
+
 Then, add that library to doplarr's Config.toml under backend APIs.
 
 ### Adding Implementations

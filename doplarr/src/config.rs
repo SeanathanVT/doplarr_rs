@@ -1,4 +1,5 @@
 use anyhow::Context;
+use lidarr_api::models::MonitorTypes as LidarrMonitor;
 use radarr_api::models::{MonitorTypes as RadarrMonitor, MovieStatusType};
 use serde::{Deserialize, Serialize};
 use sonarr_api::models::SeriesTypes;
@@ -23,6 +24,13 @@ pub struct Backend {
 pub enum MediaKind {
     Movie,
     Tv,
+}
+
+#[derive(Deserialize, Serialize, Debug, PartialEq, Eq, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+pub enum LidarrSearchMode {
+    Artist,
+    Album,
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq, Eq, Clone)]
@@ -71,6 +79,24 @@ pub enum BackendConfig {
         /// requester picks from a dropdown
         quality_profile: Option<String>,
     },
+    Lidarr {
+        url: String,
+        api_key: String,
+        /// Never asked in Discord; unset, it follows the root folder's default
+        quality_profile: Option<String>,
+        /// Which release types Lidarr tracks. Never asked in Discord; unset, it
+        /// follows the root folder's default
+        metadata_profile: Option<String>,
+        /// Never asked in Discord; unset, Lidarr's first root folder is used
+        rootfolder: Option<String>,
+        /// How much of a new artist's discography to monitor; when absent, the
+        /// requester picks. Ignored for artists already in the library, which
+        /// get an album picker instead.
+        monitor_type: Option<LidarrMonitor>,
+        /// Restrict search results to artists or to albums.
+        /// When absent, both are returned from a single command.
+        search_mode: Option<LidarrSearchMode>,
+    },
 }
 
 /// Starter config written when no config file exists and no migration
@@ -115,6 +141,14 @@ discord_token = "your_discord_bot_token"
 # [backends.config.Sportarr]
 # url = "http://localhost:1867"
 # api_key = "${SPORTARR_API_KEY}"
+
+# --- Lidarr ---
+# [[backends]]
+# media = "music"
+#
+# [backends.config.Lidarr]
+# url = "http://localhost:8686"
+# api_key = "${LIDARR_API_KEY}"
 "#;
 
 /// Expand `${VAR}` references against the process environment. Expansion
@@ -406,6 +440,70 @@ mod tests {
         };
 
         assert_eq!(config, expected);
+    }
+
+    #[test]
+    fn test_parse_lidarr_config() {
+        let config: Config = toml::from_str(
+            r#"
+           discord_token = "abc123"
+
+           [[backends]]
+           media = "artist"
+
+           [backends.config.Lidarr]
+           url = "http://1.2.3.4:8686"
+           api_key = "abc123"
+           rootfolder = "/music"
+           metadata_profile = "Standard"
+           monitor_type = "all"
+           search_mode = "artist"
+        "#,
+        )
+        .unwrap();
+
+        let expected = Config {
+            discord_token: "abc123".to_string(),
+            backends: vec![Backend {
+                media: "artist".to_string(),
+                config: BackendConfig::Lidarr {
+                    url: "http://1.2.3.4:8686".to_string(),
+                    api_key: "abc123".to_string(),
+                    quality_profile: None,
+                    metadata_profile: Some("Standard".to_string()),
+                    rootfolder: Some("/music".to_string()),
+                    monitor_type: Some(LidarrMonitor::All),
+                    search_mode: Some(LidarrSearchMode::Artist),
+                },
+            }],
+            log_level: None,
+            public_followup: None,
+        };
+
+        assert_eq!(config, expected);
+    }
+
+    #[test]
+    fn test_parse_lidarr_config_without_search_mode() {
+        // Omitted means both artists and albums from one command
+        let config: Config = toml::from_str(
+            r#"
+           discord_token = "abc123"
+
+           [[backends]]
+           media = "music"
+
+           [backends.config.Lidarr]
+           url = "http://1.2.3.4:8686"
+           api_key = "abc123"
+        "#,
+        )
+        .unwrap();
+
+        let BackendConfig::Lidarr { search_mode, .. } = &config.backends[0].config else {
+            panic!("expected a Lidarr backend");
+        };
+        assert_eq!(*search_mode, None);
     }
 
     #[test]

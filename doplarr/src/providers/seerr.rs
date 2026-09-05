@@ -461,7 +461,7 @@ impl MediaBackend for Seerr {
                 options.push(DropdownOption {
                     title: "All Seasons".into(),
                     description: Some("Includes future seasons".into()),
-                    id: Some(SelectableId::Integer(ALL_SEASONS_ID)),
+                    id: Some(SelectableId::Integer(ALL_ITEMS_ID)),
                 });
             }
             let capacity = MAX_DROPDOWN_OPTIONS - options.len();
@@ -598,7 +598,7 @@ impl MediaBackend for Seerr {
 
                     // "All Seasons" - let Seerr expand it (and apply its own
                     // future-season handling) via the "all" sentinel.
-                    if selected.contains(&ALL_SEASONS_ID) {
+                    if selected.contains(&ALL_ITEMS_ID) {
                         RequestPostRequestSeasons::String("all".into())
                     } else {
                         let mut nums: Vec<f64> = selected.into_iter().map(|n| n as f64).collect();
@@ -661,7 +661,7 @@ impl MediaBackend for Seerr {
                         _ => None,
                     })
                     .collect();
-                if nums.contains(&ALL_SEASONS_ID) {
+                if nums.contains(&ALL_ITEMS_ID) {
                     return " (All Seasons)".to_string();
                 }
                 nums.sort();

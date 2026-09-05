@@ -1,5 +1,5 @@
 use crate::providers::{
-    ALL_SEASONS_ID, DropdownOption, EmbedData, FieldType, MediaBackend, MediaDisplayInfo,
+    ALL_ITEMS_ID, DropdownOption, EmbedData, FieldType, MediaBackend, MediaDisplayInfo,
     RequestDetails, SelectableId, SuccessMessage,
 };
 use anyhow::Context;
@@ -466,10 +466,10 @@ fn build_success_embed(data: &EmbedData) -> Embed {
     }
 
     if let Some(ref studio) = data.studio_or_network {
-        let label = if data.media_type == "TV Series" {
-            "Network"
-        } else {
-            "Studio"
+        let label = match data.media_type {
+            "TV Series" => "Network",
+            "Album" => "Artist",
+            _ => "Studio",
         };
         fields.push(EmbedField {
             name: label.into(),
@@ -749,7 +749,7 @@ pub async fn run_interaction(
                 // re-render: selecting it clears the others; selecting another
                 // while it's active drops it.
                 let exclusive = detail.options.iter().position(
-                    |o| matches!(o.id, Some(SelectableId::Integer(n)) if n == ALL_SEASONS_ID),
+                    |o| matches!(o.id, Some(SelectableId::Integer(n)) if n == ALL_ITEMS_ID),
                 );
                 if let Some(excl) = exclusive
                     && indices.contains(&excl)

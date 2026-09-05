@@ -46,6 +46,7 @@ public_followup = true
 # - /request movie_4k  -> 4K movies (same or different Radarr)
 # - /request series    -> TV shows
 # - /request anime     -> Anime (separate Sonarr or same with different settings)
+# - /request music     -> Artists and albums via Lidarr
 
 # ------------------------------------------------------------------------------
 # RADARR BACKEND (Movies)
@@ -217,3 +218,56 @@ api_key = "your_sonarr_api_key"
 # Note: root folder and monitoring scope follow Sportarr's own defaults
 # (per-root-folder default profiles and the league's Future monitor type),
 # so those are never asked in Discord.
+
+# ------------------------------------------------------------------------------
+# LIDARR BACKEND (Music)
+# ------------------------------------------------------------------------------
+# One entry handles both artists and albums. Each result says what it is:
+# artists read "Artist", releases carry their type, so "Album", "EP" or
+# "Single". Artists already in your library are marked too.
+#
+# Picking an artist Lidarr does not have collects a monitoring scope; picking one
+# already in your library opens an album picker instead. Picking an album
+# requests just that record, and Lidarr adds the artist if it needs to. That
+# last case is the only way to request one album by an artist you do not have,
+# because Lidarr cannot list the discography of an artist it has not added.
+
+# [[backends]]
+# media = "music"
+#
+# [backends.config.Lidarr]
+# url = "http://localhost:8686"
+# api_key = "your_lidarr_api_key"
+#
+# # Optional: how much of a new artist's discography to monitor.
+# # One of: all, future, missing, existing, latest, first, none. "all" and
+# # "future" also keep future releases monitored. Omit to let users choose.
+# # Ignored for artists already in the library, which get an album picker.
+# # monitor_type = "all"
+#
+# # Optional: where and how artists are added. Unlike Radarr and Sonarr these
+# # are never asked in Discord - they are admin decisions. Left unset they
+# # follow Lidarr's own defaults: the first root folder, and that folder's
+# # default quality and metadata profiles.
+# # rootfolder = "/music"
+# # quality_profile = "Lossless"
+# # metadata_profile = "Standard"
+#
+# # Optional: restrict a backend to one kind with search_mode ("artist" or
+# # "album"), which splits music into /request artist and /request album:
+#
+# [[backends]]
+# media = "artist"
+#
+# [backends.config.Lidarr]
+# url = "http://localhost:8686"
+# api_key = "your_lidarr_api_key"
+# search_mode = "artist"
+#
+# [[backends]]
+# media = "album"
+#
+# [backends.config.Lidarr]
+# url = "http://localhost:8686"
+# api_key = "your_lidarr_api_key"
+# search_mode = "album"

@@ -31,7 +31,7 @@ Under **OAuth2 → URL Generator**, tick the `bot` and `applications.commands` s
 
 ### 2. Get your backend API keys
 
-- **Sonarr / Radarr**: Settings → General → Security → API Key
+- **Sonarr / Radarr / Lidarr**: Settings → General → Security → API Key
 - **Seerr**: Settings → API Key — must be an **admin** key
 
 ### 3. Configure and run
@@ -79,7 +79,7 @@ leave out (quality profile, root folder, …) is simply asked for in Discord at
 request time.
 
 That's all most setups need. For the **full list of options** — plus Seerr, 4K,
-anime, and pointing several commands at one instance — see the annotated
+anime, music, and pointing several commands at one instance — see the annotated
 **[config.example.toml](config.example.toml)**.
 
 > [!TIP]
@@ -98,6 +98,21 @@ anime, and pointing several commands at one instance — see the annotated
 > notification agent (Settings → Notifications → Discord), then each user enters
 > their Discord User ID on their profile. To accept requests from unlinked users
 > instead, set `fallback_user_id` in the config.
+
+### Using Lidarr
+
+One Lidarr backend covers both artists and albums from a single command, with
+each result tagged in the dropdown. Set `search_mode` to `artist` or `album` if
+you would rather split them into two commands.
+
+> [!NOTE]
+> Lidarr can't list the albums of an artist it hasn't added yet, which shapes
+> what you're asked. Pick an artist Lidarr doesn't have and it asks how much of
+> their discography to monitor, the same choice Lidarr's own Add Artist screen
+> offers. Pick one already in your library, marked as such in the results, and
+> you get an album picker instead. Pick an album and just that record is
+> requested, with Lidarr adding the artist if it needs to, which is the only way
+> to get a single album by an artist you don't already have.
 
 ## Running as a Service
 
@@ -150,7 +165,7 @@ cargo build --release
 **Backend connection errors**
 - Test your API keys directly in the \*arr web UI
 - If running in Docker, make sure the container can reach your \*arr services (check network/hostname)
-- Quality profile names are case-sensitive and must match exactly what's in Sonarr/Radarr settings
+- Quality profile names are case-sensitive and must match exactly what's in Sonarr/Radarr/Lidarr/Sportarr settings
 
 **Seerr: "user not found" or requests rejected**
 1. Enable the Discord notification agent in Seerr (Settings → Notifications → Discord)
